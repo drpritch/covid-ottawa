@@ -13,9 +13,18 @@ if (FALSE) {
   #   "(CLASS='23' AND RANK <> '4' AND RANK <> '5'))"));
       "(RANK <> '4' AND RANK <> '5'))"));
   st_write(majorRoadsShape, '../input/majorRoads.shp');
+  
+  waterShape <- st_read('../input/lhy_000c16a_e.shp',
+     query=paste0("SELECT * FROM \"lhy_000c16a_e\" WHERE ",
+                  "(PRUID='35' OR PRUID='24') AND ",
+                  "(NAME LIKE '%Ottawa River%' OR NAME LIKE '%Rideau River%' OR NAME LIKE '%Rideau Canal%')"));
+  st_write(waterShape, '../input/ottawaRiver.shp');
 }
 majorRoadsShape <- st_read('../input/majorRoads.shp') %>%
   st_transform(st_crs(26923));
+ottawaRiverShape <- st_read('../input/ottawaRiver.shp') %>%
+  st_transform(st_crs(26923)) %>%
+  st_simplify(dTolerance=100);
 
 wardsShape <- st_read('../input/Wards.shp');
 wardsShape$WARD_NUM <- as.integer(wardsShape$WARD_NUM);
@@ -74,11 +83,21 @@ zoomBbox <- function(bbox, xfactor, yfactor) {
       bbox$xmax - w/2*(1-1/xfactor),
       bbox$ymax - h/2*(1-1/yfactor)), crs=st_crs(26923));
 };
-wardsLim <- zoomBbox(st_bbox(wards$geometry), 1.8, 2.5);
+wardsLim <- as.list(st_bbox(wards));
+wardsLim$w <- wardsLim$xmax - wardsLim$xmin;
+wardsLim$h <- wardsLim$ymax - wardsLim$ymin;
+capitalLim <- st_bbox(wards %>% filter(WARD_NUM == '17'));
+wardsLim <- st_bbox(c(
+  capitalLim$xmin - wardsLim$w*0.3,
+  capitalLim$ymin - wardsLim$h*0.2,
+  capitalLim$xmax + wardsLim$w*0.3,
+  capitalLim$ymax + wardsLim$h*0.2
+))
 ggplot(wards) + # %>% filter(date=='Dec 1-14')) +
   facet_wrap(~date) +
   geom_sf(aes(geometry=geometry, fill=caserate), color='#00000040', size=0.2) +
   scale_fill_fermenter(palette='GnBu', direction=1, breaks=1:6*20, limits=c(0,140), oob=scales::squish) +
+  geom_sf(data=ottawaRiverShape, aes(geometry=geometry), size=0.2, color='#a0a0a0') +
   geom_sf(data=majorRoadsShape %>% filter(CLASS %in% c('11','12')), aes(geometry=geometry), size=0.2) +
   theme_minimal() +
   coord_sf(xlim=c(wardsLim$xmin, wardsLim$xmax), ylim=c(wardsLim$ymin, wardsLim$ymax),
