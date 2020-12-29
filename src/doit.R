@@ -3,22 +3,36 @@ library('dplyr');
 library('ggplot2');
 library('ggpubr');
 
+if (FALSE) {
+  # Toronto: DVP and Gardiner are CLASS=23, RANK=3. Sigh.
+  majorRoadsShape <- st_read('../input/lrnf000r20a_e.shp',
+     query=paste0("SELECT * FROM \"lrnf000r20a_e\" WHERE ",
+     "(PRUID_L='35' OR PRUID_L='24') AND ",
+     "(CSDNAME_R='Ottawa' OR CSDNAME_R='Gatineau') AND ",
+     "(CLASS='10' OR CLASS='11' OR CLASS='12' OR ",
+  #   "(CLASS='23' AND RANK <> '4' AND RANK <> '5'))"));
+      "(RANK <> '4' AND RANK <> '5'))"));
+  st_write(majorRoadsShape, '../input/majorRoads.shp');
+}
+majorRoadsShape <- st_read('../input/majorRoads.shp') %>%
+  st_transform(st_crs(26923));
+
 wardsShape <- st_read('../input/Wards.shp');
 wardsShape$WARD_NUM <- as.integer(wardsShape$WARD_NUM);
 
 # These are case *rates*, despite the names here.
-cases <- read.csv('../input/covid_ottawa_geog.csv', fileEncoding='macintosh')[1:17];
+cases <- read.csv('../input/covid_ottawa_geog.csv', fileEncoding='macintosh')[1:18];
 colnames(cases)[4:ncol(cases)] <- sapply(colnames(cases)[4:ncol(cases)], function(x) { substring(x,2) });
 # If the pop were here, this would convert to cases. But we don't do that.
 temp <- (cases[,5:ncol(cases)] - cases[,4:(ncol(cases)-1)]);# * cases$pop / 100000;
 temp[temp < 0] <- 0;
 #colnames(temp) <- sapply(colnames(temp), function(x) { paste0("d_",x)});
-colnames(temp) <- c('May 20-Jun 9', 'Jun 10-Jul 6', 'Jul 7-20', 'Jul 21-Aug 3', 'Aug 4-17', 'Aug 18-24', 'Aug 24-Sep 7', 'Sep 8-21', 'Sep 22-Oct 5', 'Oct 6-19', 'Oct 20-Nov 2', 'Nov 3-16', 'Nov 17-Nov 30');
+colnames(temp) <- c('May 20-Jun 9', 'Jun 10-Jul 6', 'Jul 7-20', 'Jul 21-Aug 3', 'Aug 4-17', 'Aug 18-24', 'Aug 24-Sep 7', 'Sep 8-21', 'Sep 22-Oct 5', 'Oct 6-19', 'Oct 20-Nov 2', 'Nov 3-16', 'Nov 17-30', 'Dec 1-14');
 temp[,1] <- temp[,1] / 3;
 temp[,2] <- temp[,2] / (4-1/7);
 temp[,3:5] <- temp[,3:5] / 2;
 temp[,6] <- temp[,6] / 1;
-temp[,7:13] <- temp[,7:13] / 2;
+temp[,7:14] <- temp[,7:14] / 2;
 # This for cumulative
 #wards2 <- cbind(cases[,1:2], cases[,4:ncol(cases)]);
 # These two for "by period"
@@ -37,20 +51,40 @@ wards2$'12.Oct.20' <- wards2$'19.Oct.20';
 wards2$'26.Oct.20' <- wards2$'02.Nov.20';
 wards2$'09.Nov.20' <- wards2$'16.Nov.20';
 wards2$'23.Nov.20' <- wards2$'30.Nov.20';
+wards2$'07.Dec.20' <- wards2$'14.Dec.20';
 cases <- cbind(cases, temp);
 # Highest value: 141.
-wards <- wardsShape %>%
-  left_join(pmin(cases, 140), by = c('WARD_NUM' = 'wardnum')) %>%
-#  st_crop(c(xmin=-76.2,ymin=45.2,xmax=75.3,ymax=45.5)) %>%
-  select(geometry, #WARD_NUM, wardname,
-         colnames(temp[7:ncol(temp)]));
-grDevices::png('maps.png', width=2000, height=1150, units='px', pointsize=14, res=300);
+
+wards <- wardsShape %>% st_transform(crs=26923) %>%
+  left_join(cases %>% select(c(colnames(cases)[1:3],colnames(temp[7:ncol(temp)]))) %>%
+              tidyr::pivot_longer(tidyr::contains('-'), names_to='date', values_to = 'caserate'),
+            by = c('WARD_NUM' = 'wardnum'));
+wards$date <- factor(wards$date, levels=colnames(temp[7:ncol(temp)]));
 # Blues for rates, greens for counts
 # nbreaks=7 for 0..140 gives roughly 20 per bin.
-plot(wards, pal=scales::brewer_pal(palette='GnBu'), key.pos=4, nbreaks=7, breaks='equal', border='#00000060',
-     xlim=c(xmin=-76.05, xmax=-75.35), ylim=c(ymin=45.2, ymax=45.5), max.plot=12);
-title(sub="COVID Weekly Cases per 100k excl. LTC/RH");
-dev.off();
+#plot(wards, pal=scales::brewer_pal(palette='GnBu'), key.pos=4, nbreaks=7, breaks='equal', border='#00000060',
+#     xlim=c(xmin=-76.05, xmax=-75.35), ylim=c(ymin=45.2, ymax=45.5), max.plot=12);
+#title(sub="COVID Weekly Cases per 100k excl. LTC/RH");
+zoomBbox <- function(bbox, xfactor, yfactor) {
+  w <- bbox$xmax - bbox$xmin;
+  h <- bbox$ymax - bbox$ymin;
+  st_bbox(
+    c(bbox$xmin + w/2*(1-1/xfactor),
+      bbox$ymin + h/2*(1-1/yfactor),
+      bbox$xmax - w/2*(1-1/xfactor),
+      bbox$ymax - h/2*(1-1/yfactor)), crs=st_crs(26923));
+};
+wardsLim <- zoomBbox(st_bbox(wards$geometry), 1.8, 2.5);
+ggplot(wards) + # %>% filter(date=='Dec 1-14')) +
+  facet_wrap(~date) +
+  geom_sf(aes(geometry=geometry, fill=caserate), color='#00000040', size=0.2) +
+  scale_fill_fermenter(palette='GnBu', direction=1, breaks=1:6*20, limits=c(0,140), oob=scales::squish) +
+  geom_sf(data=majorRoadsShape %>% filter(CLASS %in% c('11','12')), aes(geometry=geometry), size=0.2) +
+  theme_minimal() +
+  coord_sf(xlim=c(wardsLim$xmin, wardsLim$xmax), ylim=c(wardsLim$ymin, wardsLim$ymax),
+           label_graticule='') +
+  ggtitle('COVID-19 in Ottawa: weekly cases per 100,000 by ward');
+ggsave('maps.png', width=6, height=4, dpi='print', device='png', units='in',scale=2);
 #graphics::title(main='COVID19 cases per 100,00 in Ottawa by ward');
 
 wards2 <- cbind(wards2)
@@ -164,7 +198,7 @@ ages <- ages %>% tidyr::pivot_longer(cols=2:11, names_to='age', names_prefix='ca
 rates$week <- floor((rates$date - as.Date('2020-01-06'))/7);
 ages$week <- floor((ages$date - as.Date('2020-01-06'))/7);
 ggplot(rates %>% group_by(week, age) %>% summarise(date=min(date), cases=sum(value))
-         %>% filter(date > as.Date('2020-07-01') & date < as.Date('2020-11-02') & !(age %in% c('80-89', '90+'))), aes(y=age, x=date)) +
+         %>% filter(date > as.Date('2020-07-01') & date < as.Date('2020-11-20') & !(age %in% c('80-89', '90+'))), aes(y=age, x=date)) +
   geom_tile(aes(fill=cases)) +
   scale_fill_distiller(palette='YlGnBu') +
   labs(fill='weekly cases/100K', x='episode date') +
@@ -173,11 +207,9 @@ ggplot(rates %>% group_by(week, age) %>% summarise(date=min(date), cases=sum(val
   ggtitle('Ottawa COVID-19 Case Rates By Age');
 
 
-# NOOOO - not quite meaningful, as they're case rates.
-
 agesFilter <- ages %>% group_by(week, age) %>%
   summarise(date=min(date), cases=sum(value)) %>%
-  filter(date > as.Date('2020-07-01') & date < as.Date('2020-11-15'));
+  filter(date > as.Date('2020-07-01') & date < as.Date('2020-12-07'));
 agesFilter$age <- forcats::fct_rev(agesFilter$age);
 #agesFilterYoung <- agesFilter %>% filter(!age %in% c('70-79','80-89','90+'));
 agesFilterYoung <- agesFilter;
