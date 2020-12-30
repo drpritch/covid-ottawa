@@ -17,7 +17,7 @@ if (FALSE) {
   waterShape <- st_read('../input/lhy_000c16a_e.shp',
      query=paste0("SELECT * FROM \"lhy_000c16a_e\" WHERE ",
                   "(PRUID='35' OR PRUID='24') AND ",
-                  "(NAME LIKE '%Ottawa River%' OR NAME LIKE '%Rideau River%' OR NAME LIKE '%Rideau Canal%')"));
+                  "(NAME LIKE '%Ottawa River%' OR NAME LIKE '%Lac Desch%' OR NAME LIKE '%Rideau River%' OR NAME='Dows Lake' OR NAME='Lac Leamy' OR NAME LIKE '%Gatineau%')"));
   st_write(waterShape, '../input/ottawaRiver.shp');
 }
 majorRoadsShape <- st_read('../input/majorRoads.shp') %>%
@@ -27,21 +27,25 @@ ottawaRiverShape <- st_read('../input/ottawaRiver.shp') %>%
   st_simplify(dTolerance=100);
 
 wardsShape <- st_read('../input/Wards.shp');
+rlsShape <- st_read('../input/Territoires_RLS_2020.shp');
+rlsShape$WARD_NUM <- as.integer(rlsShape$RLS_code);
+rlsShape <- rlsShape %>% filter(WARD_NUM >= 700 & WARD_NUM < 800 & WARD_NUM != 712);
 wardsShape$WARD_NUM <- as.integer(wardsShape$WARD_NUM);
 
+
 # These are case *rates*, despite the names here.
-cases <- read.csv('../input/covid_ottawa_geog.csv', fileEncoding='macintosh')[1:18];
+cases <- read.csv('../input/covid_ottawa_geog.csv', fileEncoding='macintosh')[1:19];
 colnames(cases)[4:ncol(cases)] <- sapply(colnames(cases)[4:ncol(cases)], function(x) { substring(x,2) });
 # If the pop were here, this would convert to cases. But we don't do that.
 temp <- (cases[,5:ncol(cases)] - cases[,4:(ncol(cases)-1)]);# * cases$pop / 100000;
 temp[temp < 0] <- 0;
 #colnames(temp) <- sapply(colnames(temp), function(x) { paste0("d_",x)});
-colnames(temp) <- c('May 20-Jun 9', 'Jun 10-Jul 6', 'Jul 7-20', 'Jul 21-Aug 3', 'Aug 4-17', 'Aug 18-24', 'Aug 24-Sep 7', 'Sep 8-21', 'Sep 22-Oct 5', 'Oct 6-19', 'Oct 20-Nov 2', 'Nov 3-16', 'Nov 17-30', 'Dec 1-14');
+colnames(temp) <- c('May 20-Jun 9', 'Jun 10-Jul 6', 'Jul 7-20', 'Jul 21-Aug 3', 'Aug 4-17', 'Aug 18-24', 'Aug 24-Sep 7', 'Sep 8-21', 'Sep 22-Oct 5', 'Oct 6-19', 'Oct 20-Nov 2', 'Nov 3-16', 'Nov 17-30', 'Dec 1-14', 'Dec 15-28');
 temp[,1] <- temp[,1] / 3;
 temp[,2] <- temp[,2] / (4-1/7);
 temp[,3:5] <- temp[,3:5] / 2;
 temp[,6] <- temp[,6] / 1;
-temp[,7:14] <- temp[,7:14] / 2;
+temp[,7:15] <- temp[,7:15] / 2;
 # This for cumulative
 #wards2 <- cbind(cases[,1:2], cases[,4:ncol(cases)]);
 # These two for "by period"
@@ -61,29 +65,19 @@ wards2$'26.Oct.20' <- wards2$'02.Nov.20';
 wards2$'09.Nov.20' <- wards2$'16.Nov.20';
 wards2$'23.Nov.20' <- wards2$'30.Nov.20';
 wards2$'07.Dec.20' <- wards2$'14.Dec.20';
+wards2$'21.Dec.20' <- wards2$'28.Dec.20';
 cases <- cbind(cases, temp);
 # Highest value: 141.
 
-wards <- wardsShape %>% st_transform(crs=26923) %>%
+wards <- rbind(wardsShape %>% st_transform(crs=26923) %>% select('WARD_NUM', 'geometry'),
+               rlsShape %>% st_transform(crs=26923) %>% select('WARD_NUM', 'geometry'));
+
+wards <- wards %>%
   left_join(cases %>% select(c(colnames(cases)[1:3],colnames(temp[7:ncol(temp)]))) %>%
               tidyr::pivot_longer(tidyr::contains('-'), names_to='date', values_to = 'caserate'),
             by = c('WARD_NUM' = 'wardnum'));
 wards$date <- factor(wards$date, levels=colnames(temp[7:ncol(temp)]));
-# Blues for rates, greens for counts
-# nbreaks=7 for 0..140 gives roughly 20 per bin.
-#plot(wards, pal=scales::brewer_pal(palette='GnBu'), key.pos=4, nbreaks=7, breaks='equal', border='#00000060',
-#     xlim=c(xmin=-76.05, xmax=-75.35), ylim=c(ymin=45.2, ymax=45.5), max.plot=12);
-#title(sub="COVID Weekly Cases per 100k excl. LTC/RH");
-zoomBbox <- function(bbox, xfactor, yfactor) {
-  w <- bbox$xmax - bbox$xmin;
-  h <- bbox$ymax - bbox$ymin;
-  st_bbox(
-    c(bbox$xmin + w/2*(1-1/xfactor),
-      bbox$ymin + h/2*(1-1/yfactor),
-      bbox$xmax - w/2*(1-1/xfactor),
-      bbox$ymax - h/2*(1-1/yfactor)), crs=st_crs(26923));
-};
-wardsLim <- as.list(st_bbox(wards));
+wardsLim <- as.list(st_bbox(wards %>% filter(WARD_NUM < 24)));
 wardsLim$w <- wardsLim$xmax - wardsLim$xmin;
 wardsLim$h <- wardsLim$ymax - wardsLim$ymin;
 capitalLim <- st_bbox(wards %>% filter(WARD_NUM == '17'));
@@ -93,17 +87,19 @@ wardsLim <- st_bbox(c(
   capitalLim$xmax + wardsLim$w*0.3,
   capitalLim$ymax + wardsLim$h*0.2
 ))
-ggplot(wards) + # %>% filter(date=='Dec 1-14')) +
+ggplot(wards) +# %>% filter(date=='Dec 1-14')) +
   facet_wrap(~date) +
-  geom_sf(aes(geometry=geometry, fill=caserate), color='#00000040', size=0.2) +
+  geom_sf(aes(geometry=geometry, fill=caserate), color='#00000020', size=0.2) +
   scale_fill_fermenter(palette='GnBu', direction=1, breaks=1:6*20, limits=c(0,140), oob=scales::squish) +
-  geom_sf(data=ottawaRiverShape, aes(geometry=geometry), size=0.2, color='#a0a0a0') +
-  geom_sf(data=majorRoadsShape %>% filter(CLASS %in% c('11','12')), aes(geometry=geometry), size=0.2) +
+  geom_sf(data=ottawaRiverShape, aes(geometry=geometry), color='#00000000', fill='#e0f0ff') +
+  geom_sf(data=majorRoadsShape %>% filter(CLASS %in% c('11','12')), aes(geometry=geometry), size=0.2, color='#808080') +
   theme_minimal() +
   coord_sf(xlim=c(wardsLim$xmin, wardsLim$xmax), ylim=c(wardsLim$ymin, wardsLim$ymax),
            label_graticule='') +
-  ggtitle('COVID-19 in Ottawa: weekly cases per 100,000 by ward');
-ggsave('maps.png', width=6, height=4, dpi='print', device='png', units='in',scale=2);
+  ggtitle('COVID-19 in Ottawa-Gatineau: weekly cases per 100,000 by ward/RLS') +
+  labs(fill='Cases/100K',
+       caption='Ottawa excl. LTC/RHs; Gatineau: incl. CSHLD/RI/RPAs') +
+ggsave('maps.png', width=6, height=4, dpi='print', device='png', units='in',scale=1.5);
 #graphics::title(main='COVID19 cases per 100,00 in Ottawa by ward');
 
 wards2 <- cbind(wards2)
@@ -125,8 +121,9 @@ ggplot(wards2) + geom_tile(aes(fill=value, x=date, y=wardboth)) +
   scale_fill_fermenter(palette='GnBu', direction=1, breaks=1:6*20, limits=c(0,140), oob=scales::squish) +
   scale_x_date(breaks='1 month', date_labels='%b') +
   theme(axis.title.x = element_blank(), axis.title.y=element_blank()) +
-  ggtitle('Ottawa COVID-19 weekly case rates excl. LTC/RH') +
-  labs(fill='Cases/100K');
+  ggtitle('Ottawa-Gatineau COVID-19 weekly case rates') +
+  labs(fill='Cases/100K',
+       caption='Ottawa: excl. LTC/RHs; Gatineau: incl. CSHLD/RI/RPAs') +
 ggsave('wardsHeat.png', width=4, height=4, dpi='print', device='png', units='in',scale=2);
 
 setupPlot <- function(var) {
