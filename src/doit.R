@@ -34,18 +34,21 @@ wardsShape$WARD_NUM <- as.integer(wardsShape$WARD_NUM);
 
 
 # These are case *rates*, despite the names here.
-cases <- read.csv('../input/covid_ottawa_geog.csv', fileEncoding='macintosh')[1:20];
+cases <- read.csv('../input/covid_ottawa_geog.csv', fileEncoding='macintosh');
 colnames(cases)[4:ncol(cases)] <- sapply(colnames(cases)[4:ncol(cases)], function(x) { substring(x,2) });
 # If the pop were here, this would convert to cases. But we don't do that.
 temp <- (cases[,5:ncol(cases)] - cases[,4:(ncol(cases)-1)]);# * cases$pop / 100000;
 temp[temp < 0] <- 0;
 #colnames(temp) <- sapply(colnames(temp), function(x) { paste0("d_",x)});
-colnames(temp) <- c('May 20-Jun 9', 'Jun 10-Jul 6', 'Jul 7-20', 'Jul 21-Aug 3', 'Aug 4-17', 'Aug 18-24', 'Aug 24-Sep 7', 'Sep 8-21', 'Sep 22-Oct 5', 'Oct 6-19', 'Oct 20-Nov 2', 'Nov 3-16', 'Nov 17-30', 'Dec 1-14', 'Dec 15-28', 'Dec 29-Jan 11');
+colnames(temp) <- c('May 20-Jun 9', 'Jun 10-Jul 6', 'Jul 7-20', 'Jul 21-Aug 3', 'Aug 4-17', 'Aug 18-24',
+                    'Aug 24-Sep 7', 'Sep 8-21', 'Sep 22-Oct 5', 'Oct 6-19', 'Oct 20-Nov 2', 'Nov 3-16',
+                    'Nov 17-30', 'Dec 1-14', 'Dec 15-28', 'Dec 29-Jan 11', 'Jan 12-25', 'Jan 26-Feb 8',
+                    'Feb 9-22','Feb 23-Mar 8', 'Mar 9-22');
 temp[,1] <- temp[,1] / 3;
 temp[,2] <- temp[,2] / (4-1/7);
 temp[,3:5] <- temp[,3:5] / 2;
 temp[,6] <- temp[,6] / 1;
-temp[,7:16] <- temp[,7:16] / 2;
+temp[,7:ncol(temp)] <- temp[,7:ncol(temp)] / 2;
 # This for cumulative
 #wards2 <- cbind(cases[,1:2], cases[,4:ncol(cases)]);
 # These two for "by period"
@@ -67,6 +70,11 @@ wards2$'23.Nov.20' <- wards2$'30.Nov.20';
 wards2$'07.Dec.20' <- wards2$'14.Dec.20';
 wards2$'21.Dec.20' <- wards2$'28.Dec.20';
 wards2$'04.Jan.21' <- wards2$'11.Jan.21';
+wards2$'18.Jan.21' <- wards2$'25.Jan.21';
+wards2$'01.Feb.21' <- wards2$'08.Feb.21';
+wards2$'15.Feb.21' <- wards2$'22.Feb.21';
+wards2$'01.Mar.21' <- wards2$'08.Mar.21';
+wards2$'15.Mar.21' <- wards2$'22.Mar.21';
 cases <- cbind(cases, temp);
 # Highest value: 141.
 
@@ -88,10 +96,10 @@ wardsLim <- st_bbox(c(
   capitalLim$xmax + wardsLim$w*0.3,
   capitalLim$ymax + wardsLim$h*0.2
 ))
-ggplot(wards %>% filter(date %in% c('Oct 6-19', 'Nov 3-16', 'Dec 1-14', 'Dec 29-Jan 11'))) +
+ggplot(wards %>% filter(date %in% c('Jan 12-25','Feb 9-22', 'Feb 23-Mar 8', 'Mar 9-22'))) +
   facet_wrap(~date) +
   geom_sf(aes(geometry=geometry, fill=caserate), color='#00000020', size=0.2) +
-  scale_fill_fermenter(palette='GnBu', direction=1, breaks=c(1:4*25,150,200,250,300), oob=scales::squish) +
+  scale_fill_fermenter(palette='GnBu', direction=1, breaks=c(1:7*20,200), oob=scales::censor) +
   geom_sf(data=ottawaRiverShape, aes(geometry=geometry), color='#00000000', fill='#e0f0ff') +
   geom_sf(data=majorRoadsShape %>% filter(CLASS %in% c('11','12')), aes(geometry=geometry), size=0.2, color='#808080') +
   theme_minimal() +
@@ -123,12 +131,12 @@ wards2$wardboth <- paste(stringr::str_pad(wards2$wardnum, 2, pad="0"), wards2$wa
 wards2$wardboth <- forcats::fct_rev(factor(wards2$wardboth));
 ggplot(wards2 %>% filter(date >= as.Date('2020-06-09') + 7)) + geom_tile(aes(fill=value, x=date, y=wardboth)) +
   theme_minimal() +
-  scale_fill_fermenter(palette='GnBu', direction=1, breaks=c(1:4*25,150,200,250,300), oob=scales::squish) +
+  scale_fill_fermenter(palette='GnBu', direction=1, breaks=c(1:7*20,200), oob=scales::squish) +
   scale_x_date(breaks='1 month', date_labels='%b') +
   theme(axis.title.x = element_blank(), axis.title.y=element_blank()) +
   ggtitle('Ottawa-Gatineau COVID-19 weekly case rates') +
   labs(fill='Cases/100K',
-       caption='Ottawa: excl. LTC/RHs; Gatineau: incl. CSHLD/RI/RPAs') +
+       caption='Ottawa: excl. LTC/RHs; Gatineau: incl. CSHLD/RI/RPAs');
 ggsave('wardsHeat.png', width=4, height=4, dpi='print', device='png', units='in',scale=2);
 
 setupPlot <- function(var) {
@@ -219,7 +227,7 @@ ages <- ages %>% tidyr::pivot_longer(cols=2:11, names_to='age', names_prefix='ca
 rates$week <- floor((rates$date - as.Date('2020-01-06'))/7);
 ages$week <- floor((ages$date - as.Date('2020-01-06'))/7);
 ggplot(rates %>% group_by(week, age) %>% summarise(date=min(date), cases=sum(value))
-         %>% filter(date > as.Date('2020-07-01') & date < as.Date('2020-12-30') & !(age %in% c('80-89', '90+'))), aes(y=age, x=date)) +
+         %>% filter(date > as.Date('2020-07-01') & date < as.Date('2021-01-14') & !(age %in% c('80-89', '90+'))), aes(y=age, x=date)) +
   geom_tile(aes(fill=cases)) +
   scale_fill_fermenter(palette='Blues', direction=1, breaks = 1:8*10, oob=scales::squish) +
   labs(fill='weekly cases/100K', x='episode date') +
@@ -230,7 +238,7 @@ ggplot(rates %>% group_by(week, age) %>% summarise(date=min(date), cases=sum(val
 
 agesFilter <- ages %>% group_by(week, age) %>%
   summarise(date=min(date), cases=sum(value)) %>%
-  filter(date > as.Date('2020-07-01') & date < as.Date('2020-12-25'));
+  filter(date > as.Date('2020-07-01') & date < as.Date('2021-01-14'));
 agesFilter$age <- forcats::fct_rev(agesFilter$age);
 #agesFilterYoung <- agesFilter %>% filter(!age %in% c('70-79','80-89','90+'));
 agesFilterYoung <- agesFilter;
